@@ -175,9 +175,9 @@ class TVNet(object):
     def zoom_image(self, x, new_height, new_width):
         assert len(x.shape) == 4
 
-        delta = tf.zeros((tf.shape(x)[0], 2, new_height * new_width))
-        zoomed_x = spatial_transformer.transformer(x, delta, (new_height, new_width))
-        return tf.reshape(zoomed_x, [tf.shape(x)[0], new_height, new_width, x.shape[-1].value])
+        # delta = torch.zeros((x.shape[0], 2, new_height * new_width))
+        zoomed_x = spatial_transformer.transformer(x)
+        return zoomed_x.view(x.shape[0], new_height, new_width, x.shape[-1])
 
 
 
@@ -335,8 +335,8 @@ class TVNet(object):
                  lbda=0.15,  # weight parameter for the data term
                  theta=0.3,  # weight parameter for (u - v)^2
                  warps=5,  # number of warpings per scale
-                 zfactor=0.5,  # factor for building the image piramid
-                 max_scales=5,  # maximum number of scales for image piramid
+                 zfactor=0.5,  # factor for building the image pyramid
+                 max_scales=5,  # maximum number of scales for image pyramid
                  max_iterations=5  # maximum number of iterations for optimization
                  ):
 
@@ -349,12 +349,11 @@ class TVNet(object):
         u1x, u1y = self.forward_gradient(u1, 'u1')
         u2x, u2y = self.forward_gradient(u2, 'u2')
 
-
-        u1_flat = tf.reshape(u1, (tf.shape(x2)[0], 1, x2.shape[1].value * x2.shape[2].value))
-        u2_flat = tf.reshape(u2, (tf.shape(x2)[0], 1, x2.shape[1].value * x2.shape[2].value))
+        u1_flat = u1.view(x2.shape[0], 1, x2.shape[1] * x2.shape[2])
+        u2_flat = u2.view(x2.shape[0], 1, x2.shape[1] * x2.shape[2])
 
         x2_warp = self.warp_image(x2, u1_flat, u2_flat)
-        x2_warp = tf.reshape(x2_warp, tf.shape(x2))
-        loss = lbda * tf.reduce_mean(tf.abs(x2_warp - x1)) + tf.reduce_mean(
-            tf.abs(u1x) + tf.abs(u1y) + tf.abs(u2x) + tf.abs(u2y))
+        x2_warp = x2_warp.view(x2.shape)
+        loss = lbda * (x2_warp - x1).abs().mean() + (
+            u1x.abs() + u1y.abs() + u2x.abs() + u2y.abs()).mean()
         return loss, u1, u2
