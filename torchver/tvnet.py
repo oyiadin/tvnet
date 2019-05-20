@@ -17,43 +17,42 @@ class TVNet(object):
         assert len(x.shape) == 4
         assert x.shape[-1].value == 3, 'number of channels must be 3 (i.e. RGB)'
 
-        ker_init = tf.constant_initializer([[0.114], [0.587], [0.299]])
-        grey_x = tf.layers.conv2d(x, 1, [1, 1], padding='same',
-                                  kernel_initializer=ker_init, use_bias=False, trainable=False)
-
+        w = torch.Tensor(3, 1)
+        ker_init = torch.nn.init.constant(w, [[0.114], [0.587], [0.299]])
+        grey_x = torch.nn.functional.conv2d(x, ker_init, stride=[1, 1], bias=None, padding=0)
         return tf.floor(grey_x)
 
     def normalize_images(self, x1, x2):
         reduction_axes = [i for i in xrange(1, len(x1.shape))]
-        min_x1 = tf.reduce_min(x1, axis=reduction_axes)
-        max_x1 = tf.reduce_max(x1, axis=reduction_axes)
+        min_x1 = torch.min(x1, reduction_axes)
+        max_x1 = torch.max(x1, reduction_axes)
 
-        min_x2 = tf.reduce_min(x2, axis=reduction_axes)
-        max_x2 = tf.reduce_max(x2, axis=reduction_axes)
+        min_x2 = torch.min(x2, reduction_axes)
+        max_x2 = torch.max(x2, reduction_axes)
 
-        min_val = tf.minimum(min_x1, min_x2)
-        max_val = tf.maximum(max_x1, max_x2)
+        min_val = torch.min(min_x1, min_x2)
+        max_val = torch.max(max_x1, max_x2)
 
         den = max_val - min_val
 
         expand_dims = [-1 if i == 0 else 1 for i in xrange(len(x1.shape))]
-        min_val_ex = tf.reshape(min_val, expand_dims)
-        den_ex = tf.reshape(den, expand_dims)
+        min_val_ex = torch.reshape(min_val, expand_dims)
+        den_ex = torch.reshape(den, expand_dims)
 
-        x1_norm = tf.where(den > 0, 255. * (x1 - min_val_ex) / den_ex, x1)
-        x2_norm = tf.where(den > 0, 255. * (x2 - min_val_ex) / den_ex, x2)
+        x1_norm = torch.where(den > 0, 255. * (x1 - min_val_ex) / den_ex, x1)
+        x2_norm = torch.where(den > 0, 255. * (x2 - min_val_ex) / den_ex, x2)
 
         return x1_norm, x2_norm
 
     def gaussian_smooth(self, x):
         assert len(x.shape) == 4
-        ker_init = tf.constant_initializer([[0.000874, 0.006976, 0.01386, 0.006976, 0.000874],
-                                            [0.006976, 0.0557, 0.110656, 0.0557, 0.006976],
-                                            [0.01386, 0.110656, 0.219833, 0.110656, 0.01386],
-                                            [0.006976, 0.0557, 0.110656, 0.0557, 0.006976],
-                                            [0.000874, 0.006976, 0.01386, 0.006976, 0.000874]])
-        smooth_x = tf.layers.conv2d(x, x.shape[-1].value, [5, 5], padding='same',
-                                    kernel_initializer=ker_init, use_bias=False, trainable=False)
+        w = torch.Tensor(5, 5)
+        ker_init = torch.nn.init.constant(w, [[0.000874, 0.006976, 0.01386, 0.006976, 0.000874],
+                                              [0.006976, 0.0557, 0.110656, 0.0557, 0.006976],
+                                              [0.01386, 0.110656, 0.219833, 0.110656, 0.01386],
+                                              [0.006976, 0.0557, 0.110656, 0.0557, 0.006976],
+                                              [0.000874, 0.006976, 0.01386, 0.006976, 0.000874]])
+        smooth_x = torch.nn.functional.conv2d(x, ker_init, stride=[5, 5], bias=None, padding=0)
 
         return smooth_x
 
@@ -64,7 +63,7 @@ class TVNet(object):
         u = u / x.shape[2].value * 2
         v = v / x.shape[1].value * 2
 
-        delta = tf.concat(axis=1, values=[u, v])
+        delta = torch.cat((u, v), 1)
         return spatial_transformer.transformer(x, delta, (x.shape[-3].value, x.shape[-2].value))
 
 
