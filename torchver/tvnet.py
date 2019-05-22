@@ -74,35 +74,37 @@ class TVNet(object):
         assert len(x.shape) == 4
 
         with tf.variable_scope('centered_gradient'):
-            x_ker_init = tf.constant_initializer([[-0.5, 0, 0.5]])
-            diff_x = tf.layers.conv2d(x, x.shape[-1].value, [1, 3], padding='same',
-                                      kernel_initializer=x_ker_init, use_bias=False, name=name + '_diff_x',
-                                      trainable=False)
+            w = torch.Tensor(1,3)
+            x_ker_init = torch.nn.init.constant(w,[[-0.5,0,0.5]])
+            diff_x = torch.nn.functional.conv2d(x,x_ker_init,stride=[1,3],bias=None,padding=0)
 
-            y_ker_init = tf.constant_initializer([[-0.5], [0], [0.5]])
-            diff_y = tf.layers.conv2d(x, x.shape[-1].value, [3, 1], padding='same',
-                                      kernel_initializer=y_ker_init, use_bias=False, name=name + '_diff_y',
-                                      trainable=False)
+            t = torch.Tensor(3,1)
+            y_ker_init = torch.nn.init.constant(t,[[-0.5],[0],[0.5]])
+            diff_y = torch.nn.functional.conv2d(x,y_ker_init,stride=[3,1],bias=None,padding=0)
 
-            # refine the boundary
-            first_col = 0.5 * (tf.slice(x, [0, 0, 1, 0], [-1, x.shape[1].value, 1, x.shape[3].value]) -
-                               tf.slice(x, [0, 0, 0, 0], [-1, x.shape[1].value, 1, x.shape[3].value]))
+            indices = torch.LongTensor([1])
+            first_col = 0.5 * (torch.index_select(x,2,indices))
 
-            last_col = 0.5 * (
-                tf.slice(x, [0, 0, x.shape[2].value - 1, 0], [-1, x.shape[1].value, 1, x.shape[3].value]) -
-                tf.slice(x, [0, 0, x.shape[2].value - 2, 0], [-1, x.shape[1].value, 1, x.shape[3].value]))
-            diff_x_valid = tf.slice(diff_x, begin=[0, 0, 1, 0],
-                                    size=[-1, x.shape[1].value, x.shape[2].value - 2, x.shape[3].value])
-            diff_x = tf.concat(axis=2, values=[first_col, diff_x_valid, last_col])
+            indices1 = torch.LongTensor([x.shape[2].value-1])
+            indices2 = torch.LongTensor([x.shape[2].value-2])
+            last_col = 0.5 * (torch.index_select(x,2，indices1) - torch.index_select(x,2,indices2))
+            indices3 = torch.randn(x.shape[2].value-2)
+            for i in range(x.shape[2].value-2):
+                indices3[i] = i + 1
+            diff_x_valid = torch.index_select(diff_x,2,indices3)
+            diff_x = torch.cat((first_col,diff_x_valid,last_col),1)
 
-            first_row = 0.5 * (tf.slice(x, [0, 1, 0, 0], [-1, 1, x.shape[2].value, x.shape[3].value]) -
-                               tf.slice(x, [0, 0, 0, 0], [-1, 1, x.shape[2].value, x.shape[3].value]))
-            last_row = 0.5 * (
-                tf.slice(x, [0, x.shape[1].value - 1, 0, 0], [-1, 1, x.shape[2].value, x.shape[3].value]) -
-                tf.slice(x, [0, x.shape[1].value - 2, 0, 0], [-1, 1, x.shape[2].value, x.shape[3].value]))
-            diff_y_valid = tf.slice(diff_y, begin=[0, 1, 0, 0],
-                                    size=[-1, x.shape[1].value - 2, x.shape[2].value, x.shape[3].value])
-            diff_y = tf.concat(axis=1, values=[first_row, diff_y_valid, last_row])
+            indices1 = torch.LongTensor([1])
+            indices2 = torch.LongTensor([0])
+            indices3 = torch.LongTensor([x.shape[1].value-1])
+            indices4 = torch.LongTensor([x.shape[1].value-2])
+            first_row = 0.5 * (torch.index_select(x,1,indices1) - torch.index_select(x,1,indices2))
+            last_row = 0.5 * (torch.index_select(x,1,indices3) - torch.index_select(x,1,indices4))
+            indices5 = torch.randn(x.shape[1].value-2)
+            for i in range(x.shape[1].value-2):
+                indices5[i] = i + 1
+            diff_y_valid = torch.index_select(diff_y,1,indices5)
+            diff_y = torch.cat((first_row,_diff_y,last_row),1)
 
         return diff_x, diff_y
 
@@ -110,26 +112,28 @@ class TVNet(object):
         assert len(x.shape) == 4
 
         with tf.variable_scope('forward_gradient'):
-            x_ker_init = tf.constant_initializer([[-1, 1]])
-            diff_x = tf.layers.conv2d(x, x.shape[-1].value, [1, 2], padding='same',
-                                      kernel_initializer=x_ker_init, use_bias=False, name=name + '_diff_x',
-                                      trainable=True)
+            w = (1,2)
+            x_ker_init = torch.nn.init.constant(w,[[-1,1]])
+            diff_x = torch.nn.functional.conv2d(x,x_ker_init,stride = [1,2],bias = None,padding = 0)
 
-            y_ker_init = tf.constant_initializer([[-1], [1]])
-            diff_y = tf.layers.conv2d(x, x.shape[-1].value, [2, 1], padding='same',
-                                      kernel_initializer=y_ker_init, use_bias=False, name=name + '_diff_y',
-                                      trainable=True)
+            w = (2,1)
+            y_ker_init = torch.nn.init.constant(w,[[-1],[1]])
+            diff_y = torch.nn.functional.conv2d(x,y_ker_init,stride = [2,1],bias = None,padding = 0)
 
-            # refine the boundary
-            diff_x_valid = tf.slice(diff_x, begin=[0, 0, 0, 0],
-                                    size=[-1, x.shape[1].value, x.shape[2].value - 1, x.shape[3].value])
-            last_col = tf.zeros([tf.shape(x)[0], x.shape[1].value, 1, x.shape[3].value], dtype=tf.float32)
-            diff_x = tf.concat(axis=2, values=[diff_x_valid, last_col])
+            indices = torch.randn(x.shape[2]-1)
+            for i in range(x.shape[2]-1):
+                indices[i] = i
+            diff_x_valid = torch.index_select(diff_x,2,indices)
+            last_col = torch.zeros([x.size()[0],x.shape[1].value,1,x.shape[3].value],dtype = torch.float32)
+            diff_x = torch.cat((diff_x_valid,last_col),2)
 
-            diff_y_valid = tf.slice(diff_y, begin=[0, 0, 0, 0],
-                                    size=[-1, x.shape[1].value - 1, x.shape[2].value, x.shape[3].value])
-            last_row = tf.zeros([tf.shape(x)[0], 1, x.shape[2].value, x.shape[3].value], dtype=tf.float32)
-            diff_y = tf.concat(axis=1, values=[diff_y_valid, last_row])
+            indices = torch.randn(x.shape[1]-1)
+            for i in range(x.shape[1]-1):
+                indices[i] = i
+            diff_y_valid = torch.index_select(diff_y,1,indices)
+            last_row = torch.zeros([x.size()[0],1,x.shape[2].value,x.shape[3].value],dtype = torch.float32)
+            diff_y = torch.cat((diff_y_valid,last_row),1)
+
 
         return diff_x, diff_y
 
@@ -137,25 +141,27 @@ class TVNet(object):
         assert len(x.shape) == 4
 
         with tf.variable_scope('divergence'):
-            x_valid = tf.slice(x, begin=[0, 0, 0, 0],
-                               size=[-1, x.shape[1].value, x.shape[2].value - 1, x.shape[3].value])
-            first_col = tf.zeros([tf.shape(x)[0], x.shape[1].value, 1, x.shape[3].value], dtype=tf.float32)
-            x_pad = tf.concat(axis=2, values=[first_col, x_valid])
+            indices = torch.randn(x.shape[2].value-1)
+            for i in range(x.shape[2].value-1):
+                indices[i] = i
+            x_valid = torch.index_select(x,2,indices)
+            first_col = torch.zeros([x.size()[0],x.shape[1].value,1,x.shape[3].value],dtype = torch.float32)
+            x_pad = torch.cat((first_col,x_valid),2)
 
-            y_valid = tf.slice(y, begin=[0, 0, 0, 0],
-                               size=[-1, y.shape[1].value - 1, y.shape[2].value, y.shape[3].value])
-            first_row = tf.zeros([tf.shape(y)[0], 1, y.shape[2].value, y.shape[3].value], dtype=tf.float32)
-            y_pad = tf.concat(axis=1, values=[first_row, y_valid])
+            indices = torch.randn(y.shape[1].value-1)
+            for i in range(y.shape[1].value-1):
+                indices[i] = i
+            y_valid = torch.index_select(y,1,indices)
+            first_row = torch.zeros([y.size()[0],x.shape[1].value,1,x.shape[3].value],dtype = torch.float32)
+            y_pad = torch.cat((first_row,y_valid),1)
 
-            x_ker_init = tf.constant_initializer([[-1, 1]])
-            diff_x = tf.layers.conv2d(x_pad, x.shape[-1].value, [1, 2], padding='same',
-                                      kernel_initializer=x_ker_init, use_bias=False, name=name + '_diff_x',
-                                      trainable=True)
+            t = torch.Tensor(1,2)
+            x_ker_init = torch.nn.init.constant(t,[[-1,1]])
+            diff_x = torch.nn.functional.conv2d(x_pad,x_ker_init,stride = [1,2],bias = None,padding = 0)
 
-            y_ker_init = tf.constant_initializer([[-1], [1]])
-            diff_y = tf.layers.conv2d(y_pad, y.shape[-1].value, [2, 1], padding='same',
-                                      kernel_initializer=y_ker_init, use_bias=False, name=name + '_diff_y',
-                                      trainable=True)
+            t = torch.Tensor(2,1)
+            y_ker_init = torch.nn.init.constant(t,[[-1],[1]])
+            diff_y = torch.nn.functional.conv2d(y_pad,y_ker_init,stride = [2,1],bias = None,padding = 0)
 
         div = diff_x + diff_y
         return div
