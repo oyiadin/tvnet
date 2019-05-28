@@ -295,6 +295,7 @@ class TVNet(object):
         # (N_frames, H, W, C)
 
         with tf.variable_scope('tvl1_flow'):
+        #don't know how to rewrite this QAQ
             grey_x1 = self.grey_scale_image(x1)
             grey_x2 = self.grey_scale_image(x2)
             norm_imgs = self.normalize_images(grey_x1, grey_x2)
@@ -303,16 +304,24 @@ class TVNet(object):
             smooth_x2 = self.gaussian_smooth(norm_imgs[1])
             for ss in xrange(n_scales - 1, -1, -1):
                 with tf.variable_scope('scale%d' % ss):
+                #don't know how to rewrite this QAQ
                     down_sample_factor = zfactor ** ss
                     down_height, down_width = self.zoom_size(height, width, down_sample_factor)
 
                     if ss == n_scales - 1:
-                        u1 = tf.get_variable('u1', shape=[1, down_height, down_width, 1], dtype=tf.float32,
-                                             initializer=tf.zeros_initializer)
-                        u2 = tf.get_variable('u2', shape=[1, down_height, down_width, 1], dtype=tf.float32,
-                                             initializer=tf.zeros_initializer)
-                        u1 = tf.tile(u1, [tf.shape(smooth_x1)[0], 1, 1, 1])
-                        u2 = tf.tile(u2, [tf.shape(smooth_x1)[0], 1, 1, 1])
+                        
+                        u1 = torch.zeros([1, down_height, down_width, 1], dtype=torch.float32)
+                        u2 = torch.zeros([1, down_height, down_width, 1], dtype=torch.float32)
+
+                        #u1 = tf.get_variable('u1', shape=[1, down_height, down_width, 1], dtype=tf.float32,
+                        #                     initializer=tf.zeros_initializer)
+                        #u2 = tf.get_variable('u2', shape=[1, down_height, down_width, 1], dtype=tf.float32,
+                        #                     initializer=tf.zeros_initializer)
+                        
+                        u1.repeat(smooth_x1[0].size(),1,1,1)
+                        u2.repeat(smooth_x1[0].size(),1,1,1)
+                        #u1 = tf.tile(u1, [tf.shape(smooth_x1)[0], 1, 1, 1])
+                        #u2 = tf.tile(u2, [tf.shape(smooth_x1)[0], 1, 1, 1])
 
                     down_x1 = self.zoom_image(smooth_x1, down_height, down_width)
                     down_x2 = self.zoom_image(smooth_x2, down_height, down_width)
