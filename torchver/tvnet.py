@@ -203,24 +203,24 @@ class TVNet(object):
 
         diff2_x, diff2_y = self.centered_gradient(x2, 'x2')
 
-        p11 = p12 = p21 = p22 = tf.zeros_like(x1)
+        p11 = p12 = p21 = p22 = torch.zeros_like(x1)
 
         for warpings in xrange(warps):
             with tf.variable_scope('warping%d' % (warpings,)):
-                u1_flat = tf.reshape(u1, (tf.shape(x2)[0], 1, x2.shape[1].value * x2.shape[2].value))
-                u2_flat = tf.reshape(u2, (tf.shape(x2)[0], 1, x2.shape[1].value * x2.shape[2].value))
+                u1_flat = torch.reshape(u1, (x2.sizes()[0], 1, x2.shape[1].value * x2.shape[2].value))
+                u2_flat = torch.reshape(u2, (x2.sizes()[0], 1, x2.shape[1].value * x2.shape[2].value))
 
                 x2_warp = self.warp_image(x2, u1_flat, u2_flat)
-                x2_warp = tf.reshape(x2_warp, tf.shape(x2))
+                x2_warp = self.reshape_as(x2)
 
                 diff2_x_warp = self.warp_image(diff2_x, u1_flat, u2_flat)
-                diff2_x_warp = tf.reshape(diff2_x_warp, tf.shape(diff2_x))
+                diff2_x_warp = self.reshape_as(diff2_x)
 
                 diff2_y_warp = self.warp_image(diff2_y, u1_flat, u2_flat)
-                diff2_y_warp = tf.reshape(diff2_y_warp, tf.shape(diff2_y))
+                diff2_y_warp = self.reshape_as(diff2_y)
 
-                diff2_x_sq = tf.square(diff2_x_warp)
-                diff2_y_sq = tf.square(diff2_y_warp)
+                diff2_x_sq = torch.pow(diff2_x_warp, 2)
+                diff2_y_sq = torch.pow(diff2_y_warp, 2)
 
                 grad = diff2_x_sq + diff2_y_sq + self.GRAD_IS_ZERO
 
@@ -231,16 +231,16 @@ class TVNet(object):
                         rho = rho_c + diff2_x_warp * u1 + diff2_y_warp * u2 + self.GRAD_IS_ZERO;
 
                         masks1 = rho < -l_t * grad
-                        d1_1 = tf.where(masks1, l_t * diff2_x_warp, tf.zeros_like(diff2_x_warp))
-                        d2_1 = tf.where(masks1, l_t * diff2_y_warp, tf.zeros_like(diff2_y_warp))
+                        d1_1 = torch.where(masks1, l_t * diff2_x_warp, torch.zeros_like(diff2_x_warp))
+                        d2_1 = torch.where(masks1, l_t * diff2_y_warp, torch.zeros_like(diff2_y_warp))
 
                         masks2 = rho > l_t * grad
-                        d1_2 = tf.where(masks2, -l_t * diff2_x_warp, tf.zeros_like(diff2_x_warp))
-                        d2_2 = tf.where(masks2, -l_t * diff2_y_warp, tf.zeros_like(diff2_y_warp))
+                        d1_2 = torch.where(masks2, -l_t * diff2_x_warp, torch.zeros_like(diff2_x_warp))
+                        d2_2 = torch.where(masks2, -l_t * diff2_y_warp, torch.zeros_like(diff2_y_warp))
 
                         masks3 = (~masks1) & (~masks2) & (grad > self.GRAD_IS_ZERO)
-                        d1_3 = tf.where(masks3, -rho / grad * diff2_x_warp, tf.zeros_like(diff2_x_warp))
-                        d2_3 = tf.where(masks3, -rho / grad * diff2_y_warp, tf.zeros_like(diff2_y_warp))
+                        d1_3 = torch.where(masks3, -rho / grad * diff2_x_warp, torch.zeros_like(diff2_x_warp))
+                        d2_3 = torch.where(masks3, -rho / grad * diff2_y_warp, torch.zeros_like(diff2_y_warp))
 
                         v1 = d1_1 + d1_2 + d1_3 + u1
                         v2 = d2_1 + d2_2 + d2_3 + u2
@@ -252,13 +252,13 @@ class TVNet(object):
                         u2x, u2y = self.forward_gradient(u2, 'u2')
 
                         p11 = (p11 + taut * u1x) / (
-                            1.0 + taut * tf.sqrt(tf.square(u1x) + tf.square(u1y) + self.GRAD_IS_ZERO));
+                            1.0 + taut * torch.sqrt(torch.pow(u1x, 2) + torch.pow(u1y, 2) + self.GRAD_IS_ZERO));
                         p12 = (p12 + taut * u1y) / (
-                            1.0 + taut * tf.sqrt(tf.square(u1x) + tf.square(u1y) + self.GRAD_IS_ZERO));
+                            1.0 + taut * torch.sqrt(torch.pow(u1x, 2) + torch.pow(u1y, 2) + self.GRAD_IS_ZERO));
                         p21 = (p21 + taut * u2x) / (
-                            1.0 + taut * tf.sqrt(tf.square(u2x) + tf.square(u2y) + self.GRAD_IS_ZERO));
+                            1.0 + taut * torch.sqrt(torch.pow(u2x, 2) + torch.pow(u2y, 2) + self.GRAD_IS_ZERO));
                         p22 = (p22 + taut * u2y) / (
-                            1.0 + taut * tf.sqrt(tf.square(u2x) + tf.square(u2y) + self.GRAD_IS_ZERO));
+                            1.0 + taut * torch.sqrt(torch.pow(u2x, 2) + torch.pow(u2y, 2) + self.GRAD_IS_ZERO));
 
         return u1, u2, rho
 
