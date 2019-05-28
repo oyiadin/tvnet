@@ -2,7 +2,7 @@
 
 import numpy as np
 import tensorflow as tf
-import spatial_transformer
+import torchver.spatial_transformer as spatial_transformer
 import torch.nn.functional as F
 
 import torch
@@ -42,24 +42,24 @@ class TVNet(object):
         min_val_ex = torch.reshape(min_val, expand_dims)
         den_ex = torch.reshape(den, expand_dims)
 
-        cond = den > 0
-        cond = cond.expand(cond.shape[0], *x1.shape[1:])
-        x1_norm = torch.where(den > 0, 255. * (x1 - min_val_ex) / den_ex, x1)
-        x2_norm = torch.where(den > 0, 255. * (x2 - min_val_ex) / den_ex, x2)
+        x1_norm = x1
+        x2_norm = x2
+        x1_norm[den > 0] = 255. * (x1 - min_val_ex) / den_ex
+        x2_norm[den > 0] = 255. * (x2 - min_val_ex) / den_ex
 
         return x1_norm, x2_norm
 
     def gaussian_smooth(self, x):
         assert len(x.shape) == 4
-        w = torch.Tensor(5, 5)
-        ker_init = torch.nn.init.constant(w, [
+
+        kernel = torch.FloatTensor(np.reshape([
             [0.000874, 0.006976, 0.01386, 0.006976, 0.000874],
             [0.006976, 0.0557, 0.110656, 0.0557, 0.006976],
             [0.01386, 0.110656, 0.219833, 0.110656, 0.01386],
             [0.006976, 0.0557, 0.110656, 0.0557, 0.006976],
-            [0.000874, 0.006976, 0.01386, 0.006976, 0.000874]])
-        smooth_x = torch.nn.functional.conv2d(x, ker_init, stride=[5, 5],
-                                              bias=None, padding=0)
+            [0.000874, 0.006976, 0.01386, 0.006976, 0.000874]
+        ], (1, 1, 5, 5)))
+        smooth_x = torch.nn.functional.conv2d(x, kernel, bias=None, padding=2)
 
         return smooth_x
 
@@ -67,56 +67,52 @@ class TVNet(object):
         assert len(x.shape) == 4
         assert len(u.shape) == 3
         assert len(v.shape) == 3
-        u = u / x.shape[2].value * 2
-        v = v / x.shape[1].value * 2
+        u = u / x.shape[2] * 2
+        v = v / x.shape[1] * 2
 
         delta = torch.cat((u, v), 1)
-        return spatial_transformer.transformer(x, delta, (
-            x.shape[-3].value, x.shape[-2].value))
+        return spatial_transformer.transformer(x, x.shape[-2].value, x.shape[-1])
 
     def centered_gradient(self, x, name):
         assert len(x.shape) == 4
 
-        with tf.variable_scope('centered_gradient'):
-            w = torch.Tensor(1, 3)
-            x_ker_init = torch.nn.init.constant(w, [[-0.5, 0, 0.5]])
-            diff_x = torch.nn.functional.conv2d(x, x_ker_init, stride=[1, 3],
-                                                bias=None, padding=0)
+        w = torch.FloatTensor(np.reshape([[-0.5, 0, 0.5]], (1, 1, 1, 3)))
+        diff_x = torch.nn.functional.conv2d(x, w, stride=[1, 3],
+                                            bias=None, padding=0)
 
-            t = torch.Tensor(3, 1)
-            y_ker_init = torch.nn.init.constant(t, [[-0.5], [0], [0.5]])
-            diff_y = torch.nn.functional.conv2d(x, y_ker_init, stride=[3, 1],
-                                                bias=None, padding=0)
+        t = torch.FloatTensor(np.reshape([[-0.5], [0], [0.5]], (1, 1, 3, 1)))
+        diff_y = torch.nn.functional.conv2d(x, t, stride=[3, 1],
+                                            bias=None, padding=0)
 
-            indices = torch.LongTensor([1])
-            first_col = 0.5 * (torch.index_select(x, 2, indices))
+        indices = torch.LongTensor([1])
+        first_col = 0.5 * (torch.index_select(x, 2, indices))
 
-            indices1 = torch.LongTensor([x.shape[2].value - 1])
-            indices2 = torch.LongTensor([x.shape[2].value - 2])
-            last_col = 0.5 * (
-                    torch.index_select(x, 2, indices1) - torch.index_select(
-                x, 2, indices2))
-            indices3 = torch.randn(x.shape[2].value - 2)
-            for i in range(x.shape[2].value - 2):
-                indices3[i] = i + 1
-            diff_x_valid = torch.index_select(diff_x, 2, indices3)
-            diff_x = torch.cat((first_col, diff_x_valid, last_col), 1)
+        indices1 = torch.LongTensor([x.shape[2] - 1])
+        indices2 = torch.LongTensor([x.shape[2] - 2])
+        last_col = 0.5 * (
+                torch.index_select(x, 2, indices1) - torch.index_select(
+            x, 2, indices2))
+        indices3 = torch.randn(x.shape[2] - 2)
+        for i in range(x.shape[2] - 2):
+            indices3[i] = i + 1
+        diff_x_valid = torch.index_select(diff_x, 2, indices3)
+        diff_x = torch.cat((first_col, diff_x_valid, last_col), 1)
 
-            indices1 = torch.LongTensor([1])
-            indices2 = torch.LongTensor([0])
-            indices3 = torch.LongTensor([x.shape[1].value - 1])
-            indices4 = torch.LongTensor([x.shape[1].value - 2])
-            first_row = 0.5 * (
-                    torch.index_select(x, 1, indices1) - torch.index_select(
-                x, 1, indices2))
-            last_row = 0.5 * (
-                    torch.index_select(x, 1, indices3) - torch.index_select(
-                x, 1, indices4))
-            indices5 = torch.randn(x.shape[1].value - 2)
-            for i in range(x.shape[1].value - 2):
-                indices5[i] = i + 1
-            diff_y_valid = torch.index_select(diff_y, 1, indices5)
-            diff_y = torch.cat((first_row, diff_y_valid, last_row), 1)
+        indices1 = torch.LongTensor([1])
+        indices2 = torch.LongTensor([0])
+        indices3 = torch.LongTensor([x.shape[1] - 1])
+        indices4 = torch.LongTensor([x.shape[1] - 2])
+        first_row = 0.5 * (
+                torch.index_select(x, 1, indices1) - torch.index_select(
+            x, 1, indices2))
+        last_row = 0.5 * (
+                torch.index_select(x, 1, indices3) - torch.index_select(
+            x, 1, indices4))
+        indices5 = torch.randn(x.shape[1] - 2)
+        for i in range(x.shape[1] - 2):
+            indices5[i] = i + 1
+        diff_y_valid = torch.index_select(diff_y, 1, indices5)
+        diff_y = torch.cat((first_row, diff_y_valid, last_row), 1)
 
         return diff_x, diff_y
 
@@ -139,7 +135,7 @@ class TVNet(object):
                 indices[i] = i
             diff_x_valid = torch.index_select(diff_x, 2, indices)
             last_col = torch.zeros(
-                [x.size()[0], x.shape[1].value, 1, x.shape[3].value],
+                [x.size()[0], x.shape[1], 1, x.shape[3]],
                 dtype=torch.float32)
             diff_x = torch.cat((diff_x_valid, last_col), 2)
 
@@ -148,7 +144,7 @@ class TVNet(object):
                 indices[i] = i
             diff_y_valid = torch.index_select(diff_y, 1, indices)
             last_row = torch.zeros(
-                [x.size()[0], 1, x.shape[2].value, x.shape[3].value],
+                [x.size()[0], 1, x.shape[2], x.shape[3]],
                 dtype=torch.float32)
             diff_y = torch.cat((diff_y_valid, last_row), 1)
 
@@ -158,21 +154,21 @@ class TVNet(object):
         assert len(x.shape) == 4
 
         with tf.variable_scope('divergence'):
-            indices = torch.randn(x.shape[2].value - 1)
-            for i in range(x.shape[2].value - 1):
+            indices = torch.randn(x.shape[2] - 1)
+            for i in range(x.shape[2] - 1):
                 indices[i] = i
             x_valid = torch.index_select(x, 2, indices)
             first_col = torch.zeros(
-                [x.size()[0], x.shape[1].value, 1, x.shape[3].value],
+                [x.size()[0], x.shape[1], 1, x.shape[3]],
                 dtype=torch.float32)
             x_pad = torch.cat((first_col, x_valid), 2)
 
-            indices = torch.randn(y.shape[1].value - 1)
-            for i in range(y.shape[1].value - 1):
+            indices = torch.randn(y.shape[1] - 1)
+            for i in range(y.shape[1] - 1):
                 indices[i] = i
             y_valid = torch.index_select(y, 1, indices)
             first_row = torch.zeros(
-                [y.size()[0], x.shape[1].value, 1, x.shape[3].value],
+                [y.size()[0], x.shape[1], 1, x.shape[3]],
                 dtype=torch.float32)
             y_pad = torch.cat((first_row, y_valid), 1)
 
@@ -201,8 +197,8 @@ class TVNet(object):
         assert len(x.shape) == 4
 
         # delta = torch.zeros((x.shape[0], 2, new_height * new_width))
-        zoomed_x = spatial_transformer.transformer(x)
-        return zoomed_x.view(x.shape[0], new_height, new_width, x.shape[-1])
+        zoomed_x = spatial_transformer.transformer(x, new_height, new_width)
+        return zoomed_x.view(x.shape[0], x.shape[1], new_height, new_width)
 
     def dual_tvl1_optic_flow(self, x1, x2, u1, u2,
                              tau=0.25,  # time step
@@ -223,9 +219,9 @@ class TVNet(object):
         for warpings in range(warps):
             with tf.variable_scope('warping%d' % (warpings,)):
                 u1_flat = torch.reshape(u1, (
-                x2.sizes()[0], 1, x2.shape[1].value * x2.shape[2].value))
+                x2.sizes()[0], 1, x2.shape[1] * x2.shape[2]))
                 u2_flat = torch.reshape(u2, (
-                x2.sizes()[0], 1, x2.shape[1].value * x2.shape[2].value))
+                x2.sizes()[0], 1, x2.shape[1] * x2.shape[2]))
 
                 x2_warp = self.warp_image(x2, u1_flat, u2_flat)
                 x2_warp = self.reshape_as(x2)
@@ -310,8 +306,8 @@ class TVNet(object):
 
         zfactor = np.float32(zfactor)
 
-        height = x1.shape[-3]
-        width = x1.shape[-2]
+        height = x1.shape[-2]
+        width = x1.shape[-1]
 
         n_scales = 1 + np.log(np.sqrt(height ** 2 + width ** 2) / 4.0) / np.log(
             1 / zfactor)
@@ -321,57 +317,46 @@ class TVNet(object):
 
         # (N_frames, H, W, C)
 
-        with tf.variable_scope('tvl1_flow'):
-            # don't know how to rewrite this QAQ
-            grey_x1 = self.grey_scale_image(x1)
-            grey_x2 = self.grey_scale_image(x2)
-            norm_imgs = self.normalize_images(grey_x1, grey_x2)
+        grey_x1 = self.grey_scale_image(x1)
+        grey_x2 = self.grey_scale_image(x2)
+        norm_imgs = self.normalize_images(grey_x1, grey_x2)
 
-            smooth_x1 = self.gaussian_smooth(norm_imgs[0])
-            smooth_x2 = self.gaussian_smooth(norm_imgs[1])
-            for ss in xrange(n_scales - 1, -1, -1):
-                with tf.variable_scope('scale%d' % ss):
-                    # don't know how to rewrite this QAQ
-                    down_sample_factor = zfactor ** ss
-                    down_height, down_width = self.zoom_size(height, width,
-                                                             down_sample_factor)
+        smooth_x1 = self.gaussian_smooth(norm_imgs[0])
+        smooth_x2 = self.gaussian_smooth(norm_imgs[1])
+        for ss in range(n_scales - 1, -1, -1):
+            down_sample_factor = zfactor ** ss
+            down_height, down_width = self.zoom_size(height, width,
+                                                     down_sample_factor)
 
-                    if ss == n_scales - 1:
-                        u1 = torch.zeros([1, down_height, down_width, 1],
-                                         dtype=torch.float32)
-                        u2 = torch.zeros([1, down_height, down_width, 1],
-                                         dtype=torch.float32)
+            if ss == n_scales - 1:
+                u1 = torch.zeros(1, down_height, down_width, 1,
+                                 dtype=torch.float32)
+                u2 = torch.zeros(1, down_height, down_width, 1,
+                                 dtype=torch.float32)
 
-                        # u1 = tf.get_variable('u1', shape=[1, down_height, down_width, 1], dtype=tf.float32,
-                        #                     initializer=tf.zeros_initializer)
-                        # u2 = tf.get_variable('u2', shape=[1, down_height, down_width, 1], dtype=tf.float32,
-                        #                     initializer=tf.zeros_initializer)
+                u1.repeat((smooth_x1.shape[0], 1, 1, 1))
+                u2.repeat((smooth_x1.shape[0], 1, 1, 1))
 
-                        u1.repeat(smooth_x1[0].size(), 1, 1, 1)
-                        u2.repeat(smooth_x1[0].size(), 1, 1, 1)
-                        # u1 = tf.tile(u1, [tf.shape(smooth_x1)[0], 1, 1, 1])
-                        # u2 = tf.tile(u2, [tf.shape(smooth_x1)[0], 1, 1, 1])
+            down_x1 = self.zoom_image(smooth_x1, down_height,
+                                      down_width)
+            down_x2 = self.zoom_image(smooth_x2, down_height,
+                                      down_width)
 
-                    down_x1 = self.zoom_image(smooth_x1, down_height,
-                                              down_width)
-                    down_x2 = self.zoom_image(smooth_x2, down_height,
-                                              down_width)
+            u1, u2, rho = self.dual_tvl1_optic_flow(down_x1, down_x2,
+                                                    u1, u2,
+                                                    tau=tau, lbda=lbda,
+                                                    theta=theta,
+                                                    warps=warps,
+                                                    max_iterations=max_iterations)
 
-                    u1, u2, rho = self.dual_tvl1_optic_flow(down_x1, down_x2,
-                                                            u1, u2,
-                                                            tau=tau, lbda=lbda,
-                                                            theta=theta,
-                                                            warps=warps,
-                                                            max_iterations=max_iterations)
+            if ss == 0:
+                return u1, u2, rho
 
-                    if ss == 0:
-                        return u1, u2, rho
-
-                    up_sample_factor = zfactor ** (ss - 1)
-                    up_height, up_width = self.zoom_size(height, width,
-                                                         up_sample_factor)
-                    u1 = self.zoom_image(u1, up_height, up_width) / zfactor
-                    u2 = self.zoom_image(u2, up_height, up_width) / zfactor
+            up_sample_factor = zfactor ** (ss - 1)
+            up_height, up_width = self.zoom_size(height, width,
+                                                 up_sample_factor)
+            u1 = self.zoom_image(u1, up_height, up_width) / zfactor
+            u2 = self.zoom_image(u2, up_height, up_width) / zfactor
 
     def get_loss(self, x1, x2,
                  tau=0.25,  # time step
