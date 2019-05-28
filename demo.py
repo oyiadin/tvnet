@@ -7,24 +7,31 @@ import numpy as np
 import tensorflow as tf
 # import scipy.io as sio
 from scipy.misc import imsave
-from tvnet import TVNet
+from torchver.tvnet import TVNet
 from torch.utils.data import DataLoader
+import torch
+from torch.autograd import Variable
 
-flags = tf.app.flags
-flags.DEFINE_integer("scale", 5, " TVNet scale [3]")
-flags.DEFINE_integer("warp", 5, " TVNet warp [1]")
-flags.DEFINE_integer("iteration", 50, " TVNet iteration [10]")
-flags.DEFINE_string("gpu", '0', " gpu to use [0]")
-FLAGS = flags.FLAGS
+# flags = tf.app.flags
+# flags.DEFINE_integer("scale", 5, " TVNet scale [3]")
+# flags.DEFINE_integer("warp", 5, " TVNet warp [1]")
+# flags.DEFINE_integer("iteration", 50, " TVNet iteration [10]")
+# flags.DEFINE_string("gpu", '0', " gpu to use [0]")
+# FLAGS = flags.FLAGS
+#
+# scale = FLAGS.scale
+# warp = FLAGS.warp
+# iteration = FLAGS.iteration
+# if int(FLAGS.gpu > -1):
+#     os.environ['CUDA_VISIBLE_DEVICES'] = FLAGS.gpu
+#
+# print('TVNet Params:\n scale: %d\n warp: %d\n iteration: %d\nUsing gpu: %s' \
+#       % (scale, warp, iteration, FLAGS.gpu))
 
-scale = FLAGS.scale
-warp = FLAGS.warp
-iteration = FLAGS.iteration
-if int(FLAGS.gpu > -1):
-    os.environ['CUDA_VISIBLE_DEVICES'] = FLAGS.gpu
+scale = 3
+warp = 1
+iteration = 10
 
-print 'TVNet Params:\n scale: %d\n warp: %d\n iteration: %d\nUsing gpu: %s' \
-      % (scale, warp, iteration, FLAGS.gpu)
 
 
 lines = open('/ds/hmdb_frames/split1_train.txt').readlines()
@@ -33,13 +40,14 @@ basedir = filename[:-len('.avi')]
 path = os.path.join('/ds/hmdb_frames/', label, basedir)
 frames = [f for f in os.listdir(path) \
           if os.path.isfile(os.path.join(path, f))]
+N = 20
 
 _ = cv2.imread(os.path.join(path, '00001.jpg'))
 h, w, c = _.shape
 
 # model construction
-x1 = tf.placeholder(shape=[None, h, w, 3], dtype=tf.float32)
-x2 = tf.placeholder(shape=[None, h, w, 3], dtype=tf.float32)
+x1 = Variable(torch.randn(N, 3, h, w).type(torch.float32), requires_grad=False)
+x2 = Variable(torch.randn(N, 3, h, w).type(torch.float32), requires_grad=False)
 tvnet = TVNet()
 u1, u2, rho = tvnet.tvnet_flow(x1,x2,max_scales=scale,
                      warps=warp,
@@ -55,11 +63,11 @@ for i in range(0, len(frames)):
     # load image
     images.append(cv2.imread(os.path.join(path, '%05d.jpg' % (i+1))))
 
-images = np.array(images)
+images = np.array(images).transpose([0, 3, 1, 2])  # (N, C, H, W)
 
 
 # run model
-u1_np, u2_np = sess.run([u1, u2], feed_dict={x1: images[:-1, ...], x2: images[1:, ...]})
+u1_np, u2_np = sess.run([u1, u2], feed_dict={x1: images[:N-1, ...], x2: images[1:N, ...]})
 
 u1_np = np.squeeze(u1_np)
 u2_np = np.squeeze(u2_np)
