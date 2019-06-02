@@ -59,7 +59,7 @@ class TVNet(object):
             [0.006976, 0.0557, 0.110656, 0.0557, 0.006976],
             [0.000874, 0.006976, 0.01386, 0.006976, 0.000874]
         ], (1, 1, 5, 5)))
-        smooth_x = torch.nn.functional.conv2d(x, kernel, bias=None, padding=2)
+        smooth_x = F.conv2d(x, kernel, bias=None, padding=2)
 
         return smooth_x
 
@@ -71,121 +71,78 @@ class TVNet(object):
         v = v / x.shape[1] * 2
 
         delta = torch.cat((u, v), 1)
-        return spatial_transformer.transformer(x, x.shape[-2].value, x.shape[-1])
+        return spatial_transformer.transformer(x, x.shape[-2], x.shape[-1])
 
     def centered_gradient(self, x, name):
-        assert len(x.shape) == 4
+        assert len(x.shape) == 4  # N, C, H, W
 
-        w = torch.FloatTensor(np.reshape([[-0.5, 0, 0.5]], (1, 1, 1, 3)))
-        diff_x = torch.nn.functional.conv2d(x, w, stride=[1, 3],
-                                            bias=None, padding=0)
+        x_kernel = torch.FloatTensor(np.reshape(
+            [[-0.5, 0, 0.5]], (1, 1, 1, 3)))
+        diff_x = F.conv2d(x, x_kernel, bias=None, padding=(0, 1))
 
-        t = torch.FloatTensor(np.reshape([[-0.5], [0], [0.5]], (1, 1, 3, 1)))
-        diff_y = torch.nn.functional.conv2d(x, t, stride=[3, 1],
-                                            bias=None, padding=0)
+        y_kernel = torch.FloatTensor(np.reshape(
+            [[-0.5], [0], [0.5]], (1, 1, 3, 1)))
+        diff_y = F.conv2d(x, y_kernel, bias=None, padding=(1, 0))
 
-        indices = torch.LongTensor([1])
-        first_col = 0.5 * (torch.index_select(x, 2, indices))
+        # refine the boundary
+        first_col = 0.5 * (x[:, :, :, 1] - x[:, :, :, 0])[:, :, :, None]
+        last_col = 0.5 * (x[:, :, :, -1] - x[:, :, :, -2])[:, :, :, None]
+        diff_x_valid = diff_x[:, :, :, 1:-1]
+        diff_x = torch.cat((first_col, diff_x_valid, last_col), dim=3)
 
-        indices1 = torch.LongTensor([x.shape[2] - 1])
-        indices2 = torch.LongTensor([x.shape[2] - 2])
-        last_col = 0.5 * (
-                torch.index_select(x, 2, indices1) - torch.index_select(
-            x, 2, indices2))
-        indices3 = torch.randn(x.shape[2] - 2)
-        for i in range(x.shape[2] - 2):
-            indices3[i] = i + 1
-        diff_x_valid = torch.index_select(diff_x, 2, indices3)
-        diff_x = torch.cat((first_col, diff_x_valid, last_col), 1)
-
-        indices1 = torch.LongTensor([1])
-        indices2 = torch.LongTensor([0])
-        indices3 = torch.LongTensor([x.shape[1] - 1])
-        indices4 = torch.LongTensor([x.shape[1] - 2])
-        first_row = 0.5 * (
-                torch.index_select(x, 1, indices1) - torch.index_select(
-            x, 1, indices2))
-        last_row = 0.5 * (
-                torch.index_select(x, 1, indices3) - torch.index_select(
-            x, 1, indices4))
-        indices5 = torch.randn(x.shape[1] - 2)
-        for i in range(x.shape[1] - 2):
-            indices5[i] = i + 1
-        diff_y_valid = torch.index_select(diff_y, 1, indices5)
-        diff_y = torch.cat((first_row, diff_y_valid, last_row), 1)
+        first_row = 0.5 * (x[:, :, 1, :] - x[:, :, 0, :])[:, :, None, :]
+        last_row = 0.5 * (x[:, :, -1, :] - x[:, :, -2, :])[:, :, None, :]
+        diff_y_valid = diff_y[:, :, 1:-1, :]
+        diff_y = torch.cat((first_row, diff_y_valid, last_row), dim=2)
 
         return diff_x, diff_y
 
     def forward_gradient(self, x, name):
         assert len(x.shape) == 4
 
-        with tf.variable_scope('forward_gradient'):
-            w = (1, 2)
-            x_ker_init = torch.nn.init.constant(w, [[-1, 1]])
-            diff_x = torch.nn.functional.conv2d(x, x_ker_init, stride=[1, 2],
-                                                bias=None, padding=0)
+        x_kernel = torch.FloatTensor(np.reshape([[-1, 1]], (1, 1, 1, 2)))
+        diff_x = F.conv2d(x, x_kernel, bias=None, padding=(0, 1))[:, :, :, :-1]
 
-            w = (2, 1)
-            y_ker_init = torch.nn.init.constant(w, [[-1], [1]])
-            diff_y = torch.nn.functional.conv2d(x, y_ker_init, stride=[2, 1],
-                                                bias=None, padding=0)
+        y_kernel = torch.FloatTensor(np.reshape([[-1], [1]], (1, 1, 2, 1)))
+        diff_y = F.conv2d(x, y_kernel, bias=None, padding=(1, 0))[:, :, :-1, :]
 
-            indices = torch.randn(x.shape[2] - 1)
-            for i in range(x.shape[2] - 1):
-                indices[i] = i
-            diff_x_valid = torch.index_select(diff_x, 2, indices)
-            last_col = torch.zeros(
-                [x.size()[0], x.shape[1], 1, x.shape[3]],
-                dtype=torch.float32)
-            diff_x = torch.cat((diff_x_valid, last_col), 2)
+        # refine the boundary
+        first_col = 0.5 * (x[:, :, :, 1] - x[:, :, :, 0])[:, :, :, None]
+        last_col = 0.5 * (x[:, :, :, -1] - x[:, :, :, -2])[:, :, :, None]
+        diff_x_valid = diff_x[:, :, :, 1:-1]
+        diff_x = torch.cat((first_col, diff_x_valid, last_col), dim=3)
 
-            indices = torch.randn(x.shape[1] - 1)
-            for i in range(x.shape[1] - 1):
-                indices[i] = i
-            diff_y_valid = torch.index_select(diff_y, 1, indices)
-            last_row = torch.zeros(
-                [x.size()[0], 1, x.shape[2], x.shape[3]],
-                dtype=torch.float32)
-            diff_y = torch.cat((diff_y_valid, last_row), 1)
+        first_row = 0.5 * (x[:, :, 1, :] - x[:, :, 0, :])[:, :, None, :]
+        last_row = 0.5 * (x[:, :, -1, :] - x[:, :, -2, :])[:, :, None, :]
+        diff_y_valid = diff_y[:, :, 1:-1, :]
+        diff_y = torch.cat((first_row, diff_y_valid, last_row), dim=2)
 
         return diff_x, diff_y
 
     def divergence(self, x, y, name):
         assert len(x.shape) == 4
 
-        with tf.variable_scope('divergence'):
-            indices = torch.randn(x.shape[2] - 1)
-            for i in range(x.shape[2] - 1):
-                indices[i] = i
-            x_valid = torch.index_select(x, 2, indices)
-            first_col = torch.zeros(
-                [x.size()[0], x.shape[1], 1, x.shape[3]],
-                dtype=torch.float32)
-            x_pad = torch.cat((first_col, x_valid), 2)
+        x_valid = x[:, :, :, :-1]
+        first_col = torch.zeros(x.shape[0], x.shape[1], x.shape[2], 1,
+                                dtype=torch.float32)
+        x_pad = torch.cat((first_col, x_valid), dim=3)
 
-            indices = torch.randn(y.shape[1] - 1)
-            for i in range(y.shape[1] - 1):
-                indices[i] = i
-            y_valid = torch.index_select(y, 1, indices)
-            first_row = torch.zeros(
-                [y.size()[0], x.shape[1], 1, x.shape[3]],
-                dtype=torch.float32)
-            y_pad = torch.cat((first_row, y_valid), 1)
+        y_valid = x[:, :, :-1, :]
+        first_row = torch.zeros(x.shape[0], x.shape[1], 1, x.shape[3],
+                                dtype=torch.float32)
+        y_pad = torch.cat((first_row, y_valid), dim=2)
 
-            t = torch.Tensor(1, 2)
-            x_ker_init = torch.nn.init.constant(t, [[-1, 1]])
-            diff_x = torch.nn.functional.conv2d(x_pad, x_ker_init,
-                                                stride=[1, 2], bias=None,
-                                                padding=0)
+        x_kernel = torch.FloatTensor(np.reshape([[-1, 1]], (1, 1, 1, 2)))
+        diff_x = F.conv2d(x_pad, x_kernel,
+                          bias=None, padding=(0, 1))[:, :, :, :-1]
 
-            t = torch.Tensor(2, 1)
-            y_ker_init = torch.nn.init.constant(t, [[-1], [1]])
-            diff_y = torch.nn.functional.conv2d(y_pad, y_ker_init,
-                                                stride=[2, 1], bias=None,
-                                                padding=0)
+        y_kernel = torch.FloatTensor(np.reshape([[-1], [1]], (1, 1, 2, 1)))
+        diff_y = F.conv2d(y_pad, y_kernel,
+                          bias=None, padding=(1, 0))[:, :, :-1, :]
 
         div = diff_x + diff_y
         return div
+
 
     def zoom_size(self, height, width, factor):
         new_height = int(float(height) * factor + 0.5)
@@ -217,76 +174,78 @@ class TVNet(object):
         p11 = p12 = p21 = p22 = torch.zeros_like(x1)
 
         for warpings in range(warps):
-            with tf.variable_scope('warping%d' % (warpings,)):
-                u1_flat = torch.reshape(u1, (
-                x2.sizes()[0], 1, x2.shape[1] * x2.shape[2]))
-                u2_flat = torch.reshape(u2, (
-                x2.sizes()[0], 1, x2.shape[1] * x2.shape[2]))
+            u1_flat = torch.reshape(u1, (
+                x2.shape[0], 1, x2.shape[2] * x2.shape[3]))
+            u2_flat = torch.reshape(u2, (
+                x2.shape[0], 1, x2.shape[2] * x2.shape[3]))
 
-                x2_warp = self.warp_image(x2, u1_flat, u2_flat)
-                x2_warp = self.reshape_as(x2)
+            x2_warp = self.warp_image(x2, u1_flat, u2_flat)
+            x2_warp = torch.reshape(x2_warp, x2.shape)
 
-                diff2_x_warp = self.warp_image(diff2_x, u1_flat, u2_flat)
-                diff2_x_warp = self.reshape_as(diff2_x)
+            diff2_x_warp = self.warp_image(diff2_x, u1_flat, u2_flat)
+            diff2_x_warp = torch.reshape(diff2_x_warp, diff2_x.shape)
 
-                diff2_y_warp = self.warp_image(diff2_y, u1_flat, u2_flat)
-                diff2_y_warp = self.reshape_as(diff2_y)
+            diff2_y_warp = self.warp_image(diff2_y, u1_flat, u2_flat)
+            diff2_y_warp = torch.reshape(diff2_y_warp, diff2_y.shape)
 
-                diff2_x_sq = torch.pow(diff2_x_warp, 2)
-                diff2_y_sq = torch.pow(diff2_y_warp, 2)
+            diff2_x_sq = torch.pow(diff2_x_warp, 2)
+            diff2_y_sq = torch.pow(diff2_y_warp, 2)
 
-                grad = diff2_x_sq + diff2_y_sq + self.GRAD_IS_ZERO
+            grad = diff2_x_sq + diff2_y_sq + self.GRAD_IS_ZERO
 
-                rho_c = x2_warp - diff2_x_warp * u1 - diff2_y_warp * u2 - x1
+            rho_c = x2_warp - diff2_x_warp * u1 - diff2_y_warp * u2 - x1
 
-                for ii in range(max_iterations):
-                    with tf.variable_scope('iter%d' % (ii,)):
-                        rho = rho_c + diff2_x_warp * u1 + diff2_y_warp * u2 + self.GRAD_IS_ZERO;
+            for ii in range(max_iterations):
+                rho = rho_c + diff2_x_warp * u1 + diff2_y_warp * u2 + self.GRAD_IS_ZERO;
 
-                        masks1 = rho < -l_t * grad
-                        d1_1 = torch.where(masks1, l_t * diff2_x_warp,
-                                           torch.zeros_like(diff2_x_warp))
-                        d2_1 = torch.where(masks1, l_t * diff2_y_warp,
-                                           torch.zeros_like(diff2_y_warp))
+                masks1 = rho < -l_t * grad
+                d1_1 = torch.where(masks1, l_t * diff2_x_warp,
+                                   torch.zeros_like(diff2_x_warp))
+                d2_1 = torch.where(masks1, l_t * diff2_y_warp,
+                                   torch.zeros_like(diff2_y_warp))
 
-                        masks2 = rho > l_t * grad
-                        d1_2 = torch.where(masks2, -l_t * diff2_x_warp,
-                                           torch.zeros_like(diff2_x_warp))
-                        d2_2 = torch.where(masks2, -l_t * diff2_y_warp,
-                                           torch.zeros_like(diff2_y_warp))
+                masks2 = rho > l_t * grad
+                d1_2 = torch.where(masks2, -l_t * diff2_x_warp,
+                                   torch.zeros_like(diff2_x_warp))
+                d2_2 = torch.where(masks2, -l_t * diff2_y_warp,
+                                   torch.zeros_like(diff2_y_warp))
 
-                        masks3 = (~masks1) & (~masks2) & (
-                                    grad > self.GRAD_IS_ZERO)
-                        d1_3 = torch.where(masks3, -rho / grad * diff2_x_warp,
-                                           torch.zeros_like(diff2_x_warp))
-                        d2_3 = torch.where(masks3, -rho / grad * diff2_y_warp,
-                                           torch.zeros_like(diff2_y_warp))
+                masks3 = (~masks1) & (~masks2) & (
+                            grad > self.GRAD_IS_ZERO)
+                d1_3 = torch.where(masks3, -rho / grad * diff2_x_warp,
+                                   torch.zeros_like(diff2_x_warp))
+                d2_3 = torch.where(masks3, -rho / grad * diff2_y_warp,
+                                   torch.zeros_like(diff2_y_warp))
 
-                        v1 = d1_1 + d1_2 + d1_3 + u1
-                        v2 = d2_1 + d2_2 + d2_3 + u2
+                v1 = d1_1 + d1_2 + d1_3 + u1
+                v2 = d2_1 + d2_2 + d2_3 + u2
 
-                        u1 = v1 + theta * self.divergence(p11, p12, 'div_p1')
-                        u2 = v2 + theta * self.divergence(p21, p22, 'div_p2')
+                u1 = v1 + theta * self.divergence(p11, p12, 'div_p1')
+                u2 = v2 + theta * self.divergence(p21, p22, 'div_p2')
 
-                        u1x, u1y = self.forward_gradient(u1, 'u1')
-                        u2x, u2y = self.forward_gradient(u2, 'u2')
+                u1x, u1y = self.forward_gradient(u1, 'u1')
+                u2x, u2y = self.forward_gradient(u2, 'u2')
 
-                        p11 = (p11 + taut * u1x) / (
-                                1.0 + taut * torch.sqrt(
-                            torch.pow(u1x, 2) + torch.pow(u1y,
-                                                          2) + self.GRAD_IS_ZERO));
-                        p12 = (p12 + taut * u1y) / (
-                                1.0 + taut * torch.sqrt(
-                            torch.pow(u1x, 2) + torch.pow(u1y,
-                                                          2) + self.GRAD_IS_ZERO));
-                        p21 = (p21 + taut * u2x) / (
-                                1.0 + taut * torch.sqrt(
-                            torch.pow(u2x, 2) + torch.pow(u2y,
-                                                          2) + self.GRAD_IS_ZERO));
-                        p22 = (p22 + taut * u2y) / (
-                                1.0 + taut * torch.sqrt(
-                            torch.pow(u2x, 2) + torch.pow(u2y,
-                                                          2) + self.GRAD_IS_ZERO));
+                p11 = (p11 + taut * u1x) / (
+                        1.0 + taut * torch.sqrt(
+                            torch.pow(u1x, 2) \
+                            + torch.pow(u1y, 2) \
+                            + self.GRAD_IS_ZERO))
+                p12 = (p12 + taut * u1y) / (
+                        1.0 + taut * torch.sqrt(
+                            torch.pow(u1x, 2) \
+                            + torch.pow(u1y, 2) \
+                            + self.GRAD_IS_ZERO))
+                p21 = (p21 + taut * u2x) / (
+                        1.0 + taut * torch.sqrt(
+                            torch.pow(u2x, 2) \
+                            + torch.pow(u2y, 2) \
+                            + self.GRAD_IS_ZERO))
+                p22 = (p22 + taut * u2y) / (
+                        1.0 + taut * torch.sqrt(
+                            torch.pow(u2x, 2) \
+                            + torch.pow(u2y, 2) \
+                            + self.GRAD_IS_ZERO))
 
         return u1, u2, rho
 
@@ -329,13 +288,10 @@ class TVNet(object):
                                                      down_sample_factor)
 
             if ss == n_scales - 1:
-                u1 = torch.zeros(1, down_height, down_width, 1,
+                u1 = torch.zeros(smooth_x1.shape[0], 1, down_height, down_width,
                                  dtype=torch.float32)
-                u2 = torch.zeros(1, down_height, down_width, 1,
+                u2 = torch.zeros(smooth_x1.shape[0], 1, down_height, down_width,
                                  dtype=torch.float32)
-
-                u1.repeat((smooth_x1.shape[0], 1, 1, 1))
-                u2.repeat((smooth_x1.shape[0], 1, 1, 1))
 
             down_x1 = self.zoom_image(smooth_x1, down_height,
                                       down_width)

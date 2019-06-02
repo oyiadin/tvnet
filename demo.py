@@ -1,3 +1,6 @@
+import time
+t = time.time()
+
 import os
 import random
 import shutil
@@ -28,35 +31,17 @@ from torch.autograd import Variable
 # print('TVNet Params:\n scale: %d\n warp: %d\n iteration: %d\nUsing gpu: %s' \
 #       % (scale, warp, iteration, FLAGS.gpu))
 
-scale = 3
+scale = 1
 warp = 1
-iteration = 10
+iteration = 1
 
 
-
-lines = open('/ds/hmdb_frames/split1_train.txt').readlines()
+lines = open('/ds/hmdb_frames/mini_test.txt').readlines()
 filename, label = random.choice(lines).split()
 basedir = filename[:-len('.avi')]
 path = os.path.join('/ds/hmdb_frames/', label, basedir)
 frames = [f for f in os.listdir(path) \
           if os.path.isfile(os.path.join(path, f))]
-N = 20
-
-_ = cv2.imread(os.path.join(path, '00001.jpg'))
-h, w, c = _.shape
-
-# model construction
-x1 = Variable(torch.randn(N, 3, h, w).type(torch.float32), requires_grad=False)
-x2 = Variable(torch.randn(N, 3, h, w).type(torch.float32), requires_grad=False)
-tvnet = TVNet()
-u1, u2, rho = tvnet.tvnet_flow(x1,x2,max_scales=scale,
-                     warps=warp,
-                     max_iterations=iteration)
-
-# init
-sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True), allow_soft_placement=True))
-sess.run(tf.global_variables_initializer())
-
 
 images = []
 for i in range(0, len(frames)):
@@ -65,9 +50,20 @@ for i in range(0, len(frames)):
 
 images = np.array(images).transpose([0, 3, 1, 2])  # (N, C, H, W)
 
+N = images.shape[0]
+_ = cv2.imread(os.path.join(path, '00001.jpg'))
+h, w, c = _.shape
+
+# model construction
+x1 = torch.Tensor(images[:N-1, ...], device=torch.device('cpu'))
+x2 = torch.Tensor(images[1:, ...], device=torch.device('cpu'))
+tvnet = TVNet()
+u1, u2, rho = tvnet.tvnet_flow(x1,x2,max_scales=scale,
+                     warps=warp,
+                     max_iterations=iteration)
 
 # run model
-u1_np, u2_np = sess.run([u1, u2], feed_dict={x1: images[:N-1, ...], x2: images[1:N, ...]})
+u1_np, u2_np = u1.detach().numpy(), u2.detach().numpy()
 
 u1_np = np.squeeze(u1_np)
 u2_np = np.squeeze(u2_np)
@@ -92,3 +88,5 @@ for i in range(flow_mat.shape[0]):
     imsave(res_path, flow_mat[i])
 
 print(path)
+
+print((time.time() - t) / i)
